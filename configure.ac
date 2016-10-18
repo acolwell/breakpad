@@ -79,6 +79,9 @@ AC_CHECK_HEADERS([a.out.h])
 m4_include(m4/ax_cxx_compile_stdcxx.m4)
 AX_CXX_COMPILE_STDCXX(11, noext, mandatory)
 
+# libzip
+PKG_CHECK_MODULES([LIBZIP], [libzip >= 0.10.1])
+
 # Only build Linux client libs when compiling for Linux
 case $host in
   *-*-linux* | *-android* )

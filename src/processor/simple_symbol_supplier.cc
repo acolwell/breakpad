@@ -50,6 +50,8 @@
 #include "processor/logging.h"
 #include "processor/pathname_stripper.h"
 
+#include <zip.h>
+
 namespace google_breakpad {
 
 static bool file_exists(const string &file_name) {
@@ -87,10 +89,34 @@ SymbolSupplier::SymbolResult SimpleSymbolSupplier::GetSymbolFile(
   SymbolSupplier::SymbolResult s = GetSymbolFile(module, system_info,
                                                  symbol_file);
   if (s == FOUND) {
-    std::ifstream in(symbol_file->c_str());
-    std::getline(in, *symbol_data, string::traits_type::to_char_type(
-                     string::traits_type::eof()));
-    in.close();
+    string result;
+    string file;
+    file.append(symbol_file->c_str()); 
+    file.erase(file.size()-4);
+    size_t foundFile = file.find_last_of("/\\");
+    file = file.substr(foundFile+1);
+    int err = 0;
+    zip *txtOpen = zip_open(symbol_file->c_str(), 0, &err);
+    const char *txtName = file.c_str();
+    struct zip_stat txtSt;
+    zip_stat_init(&txtSt);
+    err=zip_stat(txtOpen,txtName,0,&txtSt);
+    if (err!=-1) {
+      char *txt = new char[txtSt.size+1];
+      zip_file *txtFile = zip_fopen(txtOpen,txtName,0);
+      err=zip_fread(txtFile,txt,txtSt.size);
+      if (err!=-1) {
+        zip_fclose(txtFile);
+        txt[txtSt.size] = '\0';
+        result=txt;
+      }
+      delete[] txt;
+    }
+    zip_close(txtOpen);
+    txtName = NULL;
+    if (!result.empty()) {
+      symbol_data->append(result.c_str());
+    }
   }
   return s;
 }
@@ -191,6 +217,7 @@ SymbolSupplier::SymbolResult SimpleSymbolSupplier::GetSymbolFileAtPathFromRoot(
     path.append(debug_file_name);
   }
   path.append(".sym");
+  path.append(".zip");
 
   if (!file_exists(path)) {
     BPLOG(INFO) << "No symbol file at " << path;

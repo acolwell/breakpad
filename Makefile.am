@@ -55,6 +55,10 @@ AM_CXXFLAGS += \
 	-Werror=vla
 endif
 
+# libzip
+AM_CXXFLAGS += $(LIBZIP_CFLAGS)
+AM_LDFLAGS = $(LIBZIP_LIBS)
+
 if LINUX_HOST
 # Build as PIC on Linux, for linux_client_unittest_shlib
 AM_CFLAGS += -fPIC
