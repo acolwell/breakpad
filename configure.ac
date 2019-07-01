@@ -107,7 +107,6 @@ AC_SUBST([WARN_CXXFLAGS])
 dnl Test support for O_CLOEXEC
 AX_CHECK_DEFINE([fcntl.h], [O_CLOEXEC], [],
                 [AC_DEFINE([O_CLOEXEC], [0], [Fallback definition for old systems])])
->>>>>>> upstream/master
 
 # Only build Linux client libs when compiling for Linux
 case $host in
