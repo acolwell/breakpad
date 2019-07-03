@@ -1252,7 +1252,8 @@ src_processor_microdump_stackwalk_LDADD = \
 	src/processor/stackwalker_sparc.o \
 	src/processor/stackwalker_x86.o \
 	src/processor/tokenize.o \
-	src/third_party/libdisasm/libdisasm.a
+	src/third_party/libdisasm/libdisasm.a \
+	$(LIBZIP_LIBS)
 
 src_processor_minidump_stackwalk_SOURCES = \
 	src/processor/minidump_stackwalk.cc
@@ -1292,7 +1293,8 @@ src_processor_minidump_stackwalk_LDADD = \
 	src/processor/stackwalker_x86.o \
 	src/processor/symbolic_constants_win.o \
 	src/processor/tokenize.o \
-	src/third_party/libdisasm/libdisasm.a
+	src/third_party/libdisasm/libdisasm.a \
+	$(LIBZIP_LIBS)
 
 endif !DISABLE_PROCESSOR
 
