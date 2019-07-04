@@ -43,17 +43,7 @@ AM_CXXFLAGS += -I$(top_srcdir)/src/common/android/include
 AM_CXXFLAGS += -I$(top_srcdir)/src/common/android/testing/include
 endif
 
-if GCC
-# These are good warnings to be treated as errors
-AM_CXXFLAGS += \
-	-Werror=missing-braces \
-	-Werror=non-virtual-dtor \
-	-Werror=overloaded-virtual \
-	-Werror=reorder \
-	-Werror=sign-compare \
-	-Werror=unused-variable \
-	-Werror=vla
-endif
+AM_CXXFLAGS += $(WARN_CXXFLAGS)
 
 # libzip
 AM_CXXFLAGS += $(LIBZIP_CFLAGS)
@@ -247,6 +237,8 @@ src_libbreakpad_a_SOURCES = \
 	src/processor/cfi_frame_info.h \
 	src/processor/contained_range_map-inl.h \
 	src/processor/contained_range_map.h \
+	src/processor/convert_old_arm64_context.cc \
+	src/processor/convert_old_arm64_context.h \
 	src/processor/disassembler_x86.h \
 	src/processor/disassembler_x86.cc \
 	src/processor/dump_context.cc \
@@ -401,7 +393,8 @@ check_PROGRAMS += \
 	src/processor/pathname_stripper_unittest \
 	src/processor/postfix_evaluator_unittest \
 	src/processor/proc_maps_linux_unittest \
-	src/processor/range_map_shrink_down_unittest \
+	src/processor/range_map_truncate_lower_unittest \
+	src/processor/range_map_truncate_upper_unittest \
 	src/processor/range_map_unittest \
 	src/processor/stackwalker_amd64_unittest \
 	src/processor/stackwalker_arm_unittest \
@@ -420,7 +413,8 @@ CLEANFILES += \
 	src/client/linux/linux_client_unittest_shlib
 
 check_PROGRAMS += \
-	src/client/linux/linux_client_unittest
+	src/client/linux/linux_client_unittest \
+	src/common/linux/google_crashdump_uploader_test
 
 if !DISABLE_TOOLS
 check_PROGRAMS += \
@@ -459,8 +453,12 @@ if ANDROID_HOST
 LOG_DRIVER = $(top_srcdir)/android/test-driver
 else
 # The default Autotools test driver script.
+if TESTS_AS_ROOT
+LOG_DRIVER = $(top_srcdir)/autotools/root-test-driver $(top_srcdir)/autotools/test-driver
+else
 LOG_DRIVER = $(top_srcdir)/autotools/test-driver
-endif
+endif !TESTS_AS_ROOT
+endif !ANDROID_HOST
 
 if LINUX_HOST
 src_client_linux_linux_dumper_unittest_helper_SOURCES = \
@@ -491,11 +489,12 @@ src_client_linux_linux_client_unittest_shlib_SOURCES = \
 	src/common/linux/linux_libc_support_unittest.cc \
 	src/common/linux/tests/auto_testfile.h \
 	src/common/linux/tests/crash_generator.cc \
-	src/common/memory_unittest.cc \
+	src/common/memory_allocator_unittest.cc \
 	src/common/tests/auto_tempdir.h \
 	src/common/tests/file_utils.cc \
 	src/common/tests/file_utils.h \
 	src/processor/basic_code_modules.cc \
+	src/processor/convert_old_arm64_context.cc \
 	src/processor/dump_context.cc \
 	src/processor/dump_object.cc \
 	src/processor/logging.cc \
@@ -580,8 +579,10 @@ src_tools_linux_dump_syms_dump_syms_SOURCES = \
 	src/common/dwarf_cfi_to_module.cc \
 	src/common/dwarf_cu_to_module.cc \
 	src/common/dwarf_line_to_module.cc \
+	src/common/dwarf_range_list_handler.cc \
 	src/common/language.cc \
 	src/common/module.cc \
+	src/common/path_helper.cc \
 	src/common/stabs_reader.cc \
 	src/common/stabs_to_module.cc \
 	src/common/dwarf/bytereader.cc \
@@ -606,6 +607,7 @@ src_tools_linux_dump_syms_dump_syms_LDADD = \
 
 src_tools_linux_md2core_minidump_2_core_SOURCES = \
 	src/common/linux/memory_mapped_file.cc \
+	src/common/path_helper.cc \
 	src/tools/linux/md2core/minidump-2-core.cc \
 	src/tools/linux/md2core/minidump_memory_range.h
 
@@ -626,9 +628,11 @@ src_tools_mac_dump_syms_dump_syms_mac_SOURCES = \
 	src/common/dwarf_cfi_to_module.cc \
 	src/common/dwarf_cu_to_module.cc \
 	src/common/dwarf_line_to_module.cc \
+	src/common/dwarf_range_list_handler.cc \
 	src/common/language.cc \
 	src/common/md5.cc \
 	src/common/module.cc \
+	src/common/path_helper.cc \
 	src/common/stabs_reader.cc \
 	src/common/stabs_to_module.cc \
 	src/common/dwarf/bytereader.cc \
@@ -664,10 +668,12 @@ src_common_dumper_unittest_SOURCES = \
 	src/common/dwarf_cu_to_module_unittest.cc \
 	src/common/dwarf_line_to_module.cc \
 	src/common/dwarf_line_to_module_unittest.cc \
+	src/common/dwarf_range_list_handler.cc \
 	src/common/language.cc \
 	src/common/memory_range_unittest.cc \
 	src/common/module.cc \
 	src/common/module_unittest.cc \
+	src/common/path_helper.cc \
 	src/common/stabs_reader.cc \
 	src/common/stabs_reader_unittest.cc \
 	src/common/stabs_to_module.cc \
@@ -725,6 +731,7 @@ src_common_mac_macho_reader_unittest_SOURCES = \
 	src/common/language.cc \
 	src/common/md5.cc \
 	src/common/module.cc \
+	src/common/path_helper.cc \
 	src/common/stabs_reader.cc \
 	src/common/stabs_to_module.cc \
 	src/common/test_assembler.cc \
@@ -750,6 +757,17 @@ src_common_mac_macho_reader_unittest_LDADD = \
 	$(TEST_LIBS) \
 	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
 endif
+
+src_common_linux_google_crashdump_uploader_test_SOURCES = \
+	src/common/linux/google_crashdump_uploader.cc \
+	src/common/linux/google_crashdump_uploader_test.cc \
+	src/common/linux/libcurl_wrapper.cc
+src_common_linux_google_crashdump_uploader_test_CPPFLAGS = \
+	$(AM_CPPFLAGS) $(TEST_CFLAGS)
+src_common_linux_google_crashdump_uploader_test_LDADD = \
+	$(TEST_LIBS) \
+	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS) \
+	-ldl
 
 src_tools_linux_md2core_minidump_2_core_unittest_SOURCES = \
 	src/tools/linux/md2core/minidump_memory_range_unittest.cc
@@ -804,6 +822,7 @@ src_processor_exploitability_unittest_SOURCES = \
 src_processor_exploitability_unittest_CPPFLAGS = \
 	$(AM_CPPFLAGS) $(TEST_CFLAGS)
 src_processor_exploitability_unittest_LDADD = \
+	src/processor/convert_old_arm64_context.o \
 	src/processor/minidump_processor.o \
 	src/processor/process_state.o \
 	src/processor/disassembler_x86.o \
@@ -885,6 +904,7 @@ src_processor_microdump_processor_unittest_LDADD = \
 	src/processor/basic_code_modules.o \
 	src/processor/basic_source_line_resolver.o \
 	src/processor/call_stack.o \
+        src/processor/convert_old_arm64_context.o \
 	src/processor/cfi_frame_info.o \
 	src/processor/dump_context.o \
 	src/processor/dump_object.o \
@@ -919,6 +939,7 @@ src_processor_minidump_processor_unittest_LDADD = \
 	src/processor/basic_source_line_resolver.o \
 	src/processor/call_stack.o \
 	src/processor/cfi_frame_info.o \
+	src/processor/convert_old_arm64_context.o \
 	src/processor/disassembler_x86.o \
 	src/processor/dump_context.o \
 	src/processor/dump_object.o \
@@ -958,6 +979,7 @@ src_processor_minidump_unittest_CPPFLAGS = \
 	$(AM_CPPFLAGS) $(TEST_CFLAGS)
 src_processor_minidump_unittest_LDADD = \
 	src/processor/basic_code_modules.o \
+	src/processor/convert_old_arm64_context.o \
 	src/processor/dump_context.o \
 	src/processor/dump_object.o \
 	src/processor/logging.o \
@@ -1032,14 +1054,24 @@ src_processor_postfix_evaluator_unittest_LDADD = \
 	src/processor/pathname_stripper.o \
 	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
 
-src_processor_range_map_shrink_down_unittest_SOURCES = \
-	src/processor/range_map_shrink_down_unittest.cc
-src_processor_range_map_shrink_down_unittest_LDADD = \
-  src/processor/logging.o \
+src_processor_range_map_truncate_lower_unittest_SOURCES = \
+	src/processor/range_map_truncate_lower_unittest.cc
+src_processor_range_map_truncate_lower_unittest_LDADD = \
+	src/processor/logging.o \
 	src/processor/pathname_stripper.o \
 	$(TEST_LIBS) \
 	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
-src_processor_range_map_shrink_down_unittest_CPPFLAGS = \
+src_processor_range_map_truncate_lower_unittest_CPPFLAGS = \
+	$(AM_CPPFLAGS) $(TEST_CFLAGS)
+
+src_processor_range_map_truncate_upper_unittest_SOURCES = \
+	src/processor/range_map_truncate_upper_unittest.cc
+src_processor_range_map_truncate_upper_unittest_LDADD = \
+	src/processor/logging.o \
+	src/processor/pathname_stripper.o \
+	$(TEST_LIBS) \
+	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
+src_processor_range_map_truncate_upper_unittest_CPPFLAGS = \
 	$(AM_CPPFLAGS) $(TEST_CFLAGS)
 
 src_processor_range_map_unittest_SOURCES = \
@@ -1179,6 +1211,7 @@ src_processor_minidump_dump_SOURCES = \
 	src/processor/minidump_dump.cc
 src_processor_minidump_dump_LDADD = \
 	src/processor/basic_code_modules.o \
+	src/processor/convert_old_arm64_context.o \
 	src/processor/dump_context.o \
 	src/processor/dump_object.o \
 	src/processor/logging.o \
@@ -1189,9 +1222,11 @@ src_processor_minidump_dump_LDADD = \
 src_processor_microdump_stackwalk_SOURCES = \
 	src/processor/microdump_stackwalk.cc
 src_processor_microdump_stackwalk_LDADD = \
+	src/common/path_helper.o \
 	src/processor/basic_code_modules.o \
 	src/processor/basic_source_line_resolver.o \
 	src/processor/call_stack.o \
+	src/processor/convert_old_arm64_context.o \
 	src/processor/cfi_frame_info.o \
 	src/processor/disassembler_x86.o \
 	src/processor/dump_context.o \
@@ -1217,15 +1252,18 @@ src_processor_microdump_stackwalk_LDADD = \
 	src/processor/stackwalker_sparc.o \
 	src/processor/stackwalker_x86.o \
 	src/processor/tokenize.o \
-	src/third_party/libdisasm/libdisasm.a
+	src/third_party/libdisasm/libdisasm.a \
+	$(LIBZIP_LIBS)
 
 src_processor_minidump_stackwalk_SOURCES = \
 	src/processor/minidump_stackwalk.cc
 src_processor_minidump_stackwalk_LDADD = \
+	src/common/path_helper.o \
 	src/processor/basic_code_modules.o \
 	src/processor/basic_source_line_resolver.o \
 	src/processor/call_stack.o \
 	src/processor/cfi_frame_info.o \
+	src/processor/convert_old_arm64_context.o \
 	src/processor/disassembler_x86.o \
 	src/processor/dump_context.o \
 	src/processor/dump_object.o \
@@ -1255,7 +1293,8 @@ src_processor_minidump_stackwalk_LDADD = \
 	src/processor/stackwalker_x86.o \
 	src/processor/symbolic_constants_win.o \
 	src/processor/tokenize.o \
-	src/third_party/libdisasm/libdisasm.a
+	src/third_party/libdisasm/libdisasm.a \
+	$(LIBZIP_LIBS)
 
 endif !DISABLE_PROCESSOR
 
@@ -1379,6 +1418,7 @@ EXTRA_DIST = \
 	src/processor/testdata/microdump.stackwalk-arm.out \
 	src/processor/testdata/microdump.stackwalk.machine_readable-arm64.out \
 	src/processor/testdata/microdump.stackwalk.machine_readable-arm.out \
+	src/processor/testdata/microdump-withcrashreason.dmp \
 	src/processor/testdata/microdump-x86.dmp \
 	src/processor/testdata/minidump2.dmp \
 	src/processor/testdata/minidump2.dump.out \

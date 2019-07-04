@@ -46,6 +46,7 @@
 
 #include "common/linux/memory_mapped_file.h"
 #include "common/minidump_type_helper.h"
+#include "common/path_helper.h"
 #include "common/scoped_ptr.h"
 #include "common/using_std_string.h"
 #include "google_breakpad/common/breakpad_types.h"
@@ -133,7 +134,7 @@ Usage(int argc, const char* argv[]) {
           "             lookups to be done in this directory rather than the filesystem\n"
           "             layout as it exists in the crashing image.  This path should end\n"
           "             with a slash if it's a directory.  e.g. /var/lib/breakpad/\n"
-          "", basename(argv[0]));
+          "", google_breakpad::BaseName(argv[0]).c_str());
 }
 
 static void
@@ -479,17 +480,28 @@ ParseThreadRegisters(CrashedProcess::Thread* thread,
 static void
 ParseThreadRegisters(CrashedProcess::Thread* thread,
                      const MinidumpMemoryRange& range) {
-  const MDRawContextARM64* rawregs = range.GetData<MDRawContextARM64>(0);
+#define COPY_REGS(rawregs)                                          \
+  do {                                                              \
+    for (int i = 0; i < 31; ++i)                                    \
+      thread->regs.regs[i] = rawregs->iregs[i];                     \
+    thread->regs.sp = rawregs->iregs[MD_CONTEXT_ARM64_REG_SP];      \
+    thread->regs.pc = rawregs->iregs[MD_CONTEXT_ARM64_REG_PC];      \
+    thread->regs.pstate = rawregs->cpsr;                            \
+                                                                    \
+    memcpy(thread->fpregs.vregs, rawregs->float_save.regs, 8 * 32); \
+    thread->fpregs.fpsr = rawregs->float_save.fpsr;                 \
+    thread->fpregs.fpcr = rawregs->float_save.fpcr;                 \
+  } while (false)
 
-  for (int i = 0; i < 31; ++i)
-    thread->regs.regs[i] = rawregs->iregs[i];
-  thread->regs.sp = rawregs->iregs[MD_CONTEXT_ARM64_REG_SP];
-  thread->regs.pc = rawregs->iregs[MD_CONTEXT_ARM64_REG_PC];
-  thread->regs.pstate = rawregs->cpsr;
-
-  memcpy(thread->fpregs.vregs, rawregs->float_save.regs, 8 * 32);
-  thread->fpregs.fpsr = rawregs->float_save.fpsr;
-  thread->fpregs.fpcr = rawregs->float_save.fpcr;
+  if (range.length() == sizeof(MDRawContextARM64_Old)) {
+    const MDRawContextARM64_Old* rawregs =
+        range.GetData<MDRawContextARM64_Old>(0);
+    COPY_REGS(rawregs);
+  } else {
+    const MDRawContextARM64* rawregs = range.GetData<MDRawContextARM64>(0);
+    COPY_REGS(rawregs);
+  }
+#undef COPY_REGS
 }
 #elif defined(__mips__)
 static void
@@ -589,7 +601,7 @@ ParseSystemInfo(const Options& options, CrashedProcess* crashinfo,
     exit(1);
   }
 #elif defined(__aarch64__)
-  if (sysinfo->processor_architecture != MD_CPU_ARCHITECTURE_ARM64) {
+  if (sysinfo->processor_architecture != MD_CPU_ARCHITECTURE_ARM64_OLD) {
     fprintf(stderr,
             "This version of minidump-2-core only supports ARM (64bit).\n");
     exit(1);
@@ -1132,9 +1144,8 @@ AugmentMappings(const Options& options, CrashedProcess* crashinfo,
 
       // Decide whether we use the filename or the SONAME (where the SONAME tends
       // to be a symlink to the actual file).
-      string basename = options.use_filename ? sig_filename : old_filename;
-      size_t slash = basename.find_last_of('/');
-      new_filename += basename.substr(slash == string::npos ? 0 : slash + 1);
+      new_filename += google_breakpad::BaseName(
+          options.use_filename ? sig_filename : old_filename);
 
       if (filename != new_filename) {
         if (options.verbose) {

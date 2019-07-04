@@ -47,6 +47,11 @@ typedef struct {
   AppMemoryList::const_iterator end;
 } MinidumpCallbackContext;
 
+// This define is new to Windows 10.
+#ifndef DBG_PRINTEXCEPTION_WIDE_C
+#define DBG_PRINTEXCEPTION_WIDE_C ((DWORD)0x4001000A)
+#endif
+
 vector<ExceptionHandler*>* ExceptionHandler::handler_stack_ = NULL;
 LONG ExceptionHandler::handler_stack_index_ = 0;
 CRITICAL_SECTION ExceptionHandler::handler_stack_critical_section_;
@@ -383,7 +388,7 @@ DWORD ExceptionHandler::ExceptionHandlerThreadMain(void* lpParameter) {
   assert(self->handler_start_semaphore_ != NULL);
   assert(self->handler_finish_semaphore_ != NULL);
 
-  while (true) {
+  for (;;) {
     if (WaitForSingleObject(self->handler_start_semaphore_, INFINITE) ==
         WAIT_OBJECT_0) {
       // Perform the requested action.
@@ -971,7 +976,9 @@ bool ExceptionHandler::WriteMinidumpWithExceptionForProcess(
 #if defined(_M_IX86)
           exinfo->ContextRecord->Eip;
 #elif defined(_M_AMD64)
-        exinfo->ContextRecord->Rip;
+          exinfo->ContextRecord->Rip;
+#elif defined(_M_ARM64)
+          exinfo->ContextRecord->Pc;
 #else
 #error Unsupported platform
 #endif
