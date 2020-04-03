@@ -32,10 +32,16 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <sys/mman.h>
+#else
+#include <windows.h>
+#endif
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+#include <limits.h>
+#include <stdint.h>
 
 #include <algorithm>
 #include <map>
@@ -54,6 +60,45 @@
 #if !defined(EM_AARCH64)
 #define EM_AARCH64      183             /* ARM AARCH64 */
 #endif
+
+#ifdef _WIN32
+int
+getpagesize (void)
+{
+    SYSTEM_INFO system_info;
+    GetSystemInfo (&system_info);
+    return system_info.dwPageSize;
+}
+
+#ifdef __x86_64__
+# define __WORDSIZE     64
+# define __WORDSIZE_COMPAT32    1
+#else
+# define __WORDSIZE     32
+#endif
+
+#endif
+
+// compile-time endianness checking found on:
+// http://stackoverflow.com/questions/2100331/c-macro-definition-to-determine-big-endian-or-little-endian-machine
+// if(O32_HOST_ORDER == O32_BIG_ENDIAN) will always be optimized by gcc -O2
+enum
+{
+    O32_LITTLE_ENDIAN = 0x03020100ul,
+    O32_BIG_ENDIAN = 0x00010203ul,
+    O32_PDP_ENDIAN = 0x01000302ul
+};
+
+static const union
+{
+    uint8_t bytes[4];
+    uint32_t value;
+}
+
+o32_host_order = {
+    { 0, 1, 2, 3 }
+};
+#define O32_HOST_ORDER (o32_host_order.value)
 
 // Map Linux macros to their Apple equivalents.
 #if __APPLE__
@@ -195,8 +240,23 @@ class ElfSectionReader {
     // to process its contents.
     if (header_.sh_type == SHT_NOBITS || header_.sh_size == 0)
       return;
+#ifndef _WIN32
     contents_aligned_ = mmap(NULL, size_aligned_, PROT_READ, MAP_SHARED,
                              fd, offset_aligned);
+#else
+    HANDLE h = (HANDLE)_get_osfhandle(fd);
+    hMap_ = CreateFileMapping(h, NULL, PAGE_READONLY,0, 0, NULL);
+    // XXX: should also use SEC_IMAGE_NO_EXECUTE on Windows 6.2 or later
+    if (!hMap_) {
+        return;
+    }
+    contents_aligned_ = MapViewOfFile(hMap_, FILE_MAP_READ, 0, 0, 0);
+    if (!contents_aligned_) {
+        CloseHandle(hMap_);
+        return;
+    }
+
+#endif
     // Set where the offset really should begin.
     contents_ = reinterpret_cast<char *>(contents_aligned_) +
                 (header_.sh_offset - offset_aligned);
@@ -209,10 +269,21 @@ class ElfSectionReader {
   }
 
   ~ElfSectionReader() {
-    if (contents_aligned_ != NULL)
+   /* if (contents_aligned_ != NULL)
       munmap(contents_aligned_, size_aligned_);
     else
       delete[] contents_;
+  }*/
+      if (contents_aligned_ != NULL) {
+#ifdef _WIN32
+          UnmapViewOfFile(contents_aligned_);
+          CloseHandle(hMap_);
+#else
+          munmap(contents_aligned_, size_aligned_);
+#endif
+      } else {
+           delete[] contents_;
+       }
   }
 
   // Return the section header for this section.
@@ -228,6 +299,9 @@ class ElfSectionReader {
 
  private:
   // page-aligned file contents
+#ifdef _WIN32
+  HANDLE hMap_;
+#endif
   void *contents_aligned_;
   // contents as usable by the client. For non-compressed sections,
   // pointer within contents_aligned_ to where the section data
@@ -385,7 +459,12 @@ class ElfReaderImpl {
   // in case of failure.
   static bool IsArchElfFile(int fd, string *error) {
     unsigned char header[EI_NIDENT];
+#ifdef _WIN32
+    DWORD  bytesRead;
+    if (ReadFile((HANDLE)_get_osfhandle(fd), (void*)header, sizeof(header), &bytesRead, 0) && bytesRead == sizeof(header)) {
+#else
     if (pread(fd, header, sizeof(header), 0) != sizeof(header)) {
+#endif
       if (error != NULL) *error = "Could not read header";
       return false;
     }
@@ -402,10 +481,10 @@ class ElfReaderImpl {
 
     int endian = 0;
     if (header[EI_DATA] == ELFDATA2LSB)
-      endian = __LITTLE_ENDIAN;
+      endian = (int)O32_LITTLE_ENDIAN;
     else if (header[EI_DATA] == ELFDATA2MSB)
-      endian = __BIG_ENDIAN;
-    if (endian != __BYTE_ORDER) {
+      endian = (int)O32_BIG_ENDIAN;
+    if (endian != (int)O32_HOST_ORDER) {
       if (error != NULL) *error = "Different byte order";
       return false;
     }
@@ -884,9 +963,18 @@ class ElfReaderImpl {
   // number and target architecture.
   bool ParseHeaders(int fd, const string &path) {
     // Read in the global ELF header.
+#ifdef _WIN32
+      {
+          DWORD bytesRead;
+          if (ReadFile((HANDLE)_get_osfhandle(fd), (void*)&header_, sizeof(header_), &bytesRead, 0) && bytesRead == sizeof(header_)) {
+              return false;
+          }
+      }
+#else
     if (pread(fd, &header_, sizeof(header_), 0) != sizeof(header_)) {
       return false;
     }
+#endif
 
     // Must be an executable, dynamic shared object or relocatable object
     if (header_.e_type != ET_EXEC &&
@@ -905,10 +993,19 @@ class ElfReaderImpl {
       // will read SHN_UNDEF and the true number of section header table entries
       // is found in the sh_size field of the first section header.
       // See: http://www.sco.com/developers/gabi/2003-12-17/ch4.sheader.html
+#ifdef _WIN32
+        {
+            DWORD bytesRead;
+            if (ReadFile((HANDLE)_get_osfhandle(fd), (void*)&first_section_header_, sizeof(first_section_header_), &bytesRead, 0) && bytesRead == sizeof(first_section_header_)) {
+                return false;
+            }
+        }
+#else
       if (pread(fd, &first_section_header_, sizeof(first_section_header_),
                 header_.e_shoff) != sizeof(first_section_header_)) {
         return false;
       }
+#endif
     }
 
     // Dynamically allocate enough space to store the section headers
@@ -916,10 +1013,22 @@ class ElfReaderImpl {
     const int section_headers_size =
         GetNumSections() * sizeof(*section_headers_);
     section_headers_ = new typename ElfArch::Shdr[section_headers_size];
+#ifdef _WIN32
+      {
+          OVERLAPPED ol;
+          memset(&ol, 0, sizeof(OVERLAPPED));
+          ol.Offset = header_.e_shoff;
+          DWORD bytesRead;
+          if (ReadFile((HANDLE)_get_osfhandle(fd), (void*)section_headers_, section_headers_size, &bytesRead, &ol) && bytesRead == sizeof(section_headers_size)) {
+              return false;
+          }
+      }
+#else
     if (pread(fd, section_headers_, section_headers_size, header_.e_shoff) !=
         section_headers_size) {
       return false;
     }
+#endif
 
     // Dynamically allocate enough space to store the program headers
     // and read them out of the file.
