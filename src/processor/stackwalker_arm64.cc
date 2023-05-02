@@ -1,5 +1,4 @@
-// Copyright (c) 2013 Google Inc.
-// All rights reserved.
+// Copyright 2013 Google LLC
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -11,7 +10,7 @@
 // copyright notice, this list of conditions and the following disclaimer
 // in the documentation and/or other materials provided with the
 // distribution.
-//     * Neither the name of Google Inc. nor the names of its
+//     * Neither the name of Google LLC nor the names of its
 // contributors may be used to endorse or promote products derived from
 // this software without specific prior written permission.
 //
@@ -32,6 +31,10 @@
 // See stackwalker_arm64.h for documentation.
 //
 // Author: Mark Mentovai, Ted Mielczarek, Jim Blandy, Colin Blundell
+
+#ifdef HAVE_CONFIG_H
+#include <config.h>  // Must come first
+#endif
 
 #include <vector>
 
@@ -99,7 +102,7 @@ StackFrame* StackwalkerARM64::GetContextFrame() {
 }
 
 StackFrameARM64* StackwalkerARM64::GetCallerByCFIFrameInfo(
-    const vector<StackFrame*> &frames,
+    const vector<StackFrame*>& frames,
     CFIFrameInfo* cfi_frame_info) {
   StackFrameARM64* last_frame = static_cast<StackFrameARM64*>(frames.back());
 
@@ -170,18 +173,21 @@ StackFrameARM64* StackwalkerARM64::GetCallerByCFIFrameInfo(
   if ((frame->context_validity & essentials) != essentials)
     return NULL;
 
+  frame->context.iregs[MD_CONTEXT_ARM64_REG_PC] =
+      PtrauthStrip(frame->context.iregs[MD_CONTEXT_ARM64_REG_PC]);
   frame->trust = StackFrame::FRAME_TRUST_CFI;
   return frame.release();
 }
 
 StackFrameARM64* StackwalkerARM64::GetCallerByStackScan(
-    const vector<StackFrame*> &frames) {
+    const vector<StackFrame*>& frames) {
   StackFrameARM64* last_frame = static_cast<StackFrameARM64*>(frames.back());
   uint64_t last_sp = last_frame->context.iregs[MD_CONTEXT_ARM64_REG_SP];
   uint64_t caller_sp, caller_pc;
 
   if (!ScanForReturnAddress(last_sp, &caller_sp, &caller_pc,
-                            frames.size() == 1 /* is_context_frame */)) {
+                            /*is_context_frame=*/last_frame->trust ==
+                                StackFrame::FRAME_TRUST_CONTEXT)) {
     // No plausible return address was found.
     return NULL;
   }
@@ -206,8 +212,11 @@ StackFrameARM64* StackwalkerARM64::GetCallerByStackScan(
 }
 
 StackFrameARM64* StackwalkerARM64::GetCallerByFramePointer(
-    const vector<StackFrame*> &frames) {
+    const vector<StackFrame*>& frames) {
   StackFrameARM64* last_frame = static_cast<StackFrameARM64*>(frames.back());
+  if (!(last_frame->context_validity & StackFrameARM64::CONTEXT_VALID_LR)) {
+    CorrectRegLRByFramePointer(frames, last_frame);
+  }
 
   uint64_t last_fp = last_frame->context.iregs[MD_CONTEXT_ARM64_REG_FP];
 
@@ -248,6 +257,42 @@ StackFrameARM64* StackwalkerARM64::GetCallerByFramePointer(
   return frame;
 }
 
+void StackwalkerARM64::CorrectRegLRByFramePointer(
+    const vector<StackFrame*>& frames,
+    StackFrameARM64* last_frame) {
+  // Need at least two frames to correct and
+  // register $FP should always be greater than register $SP.
+  if (frames.size() < 2 || !last_frame ||
+      last_frame->context.iregs[MD_CONTEXT_ARM64_REG_FP] <=
+          last_frame->context.iregs[MD_CONTEXT_ARM64_REG_SP])
+    return;
+
+  StackFrameARM64* last_last_frame =
+      static_cast<StackFrameARM64*>(*(frames.end() - 2));
+  uint64_t last_last_fp =
+      last_last_frame->context.iregs[MD_CONTEXT_ARM64_REG_FP];
+
+  uint64_t last_fp = 0;
+  if (last_last_fp && !memory_->GetMemoryAtAddress(last_last_fp, &last_fp)) {
+    BPLOG(ERROR) << "Unable to read last_fp from last_last_fp: 0x"
+                 << std::hex << last_last_fp;
+    return;
+  }
+  // Give up if STACK CFI doesn't agree with frame pointer.
+  if (last_frame->context.iregs[MD_CONTEXT_ARM64_REG_FP] != last_fp)
+    return;
+
+  uint64_t last_lr = 0;
+  if (last_last_fp && !memory_->GetMemoryAtAddress(last_last_fp + 8, &last_lr)) {
+    BPLOG(ERROR) << "Unable to read last_lr from (last_last_fp + 8): 0x"
+                 << std::hex << (last_last_fp + 8);
+    return;
+  }
+  last_lr = PtrauthStrip(last_lr);
+
+  last_frame->context.iregs[MD_CONTEXT_ARM64_REG_LR] = last_lr;
+}
+
 StackFrame* StackwalkerARM64::GetCallerFrame(const CallStack* stack,
                                              bool stack_scan_allowed) {
   if (!memory_ || !stack) {
@@ -255,7 +300,7 @@ StackFrame* StackwalkerARM64::GetCallerFrame(const CallStack* stack,
     return NULL;
   }
 
-  const vector<StackFrame*> &frames = *stack->frames();
+  const vector<StackFrame*>& frames = *stack->frames();
   StackFrameARM64* last_frame = static_cast<StackFrameARM64*>(frames.back());
   scoped_ptr<StackFrameARM64> frame;
 
@@ -281,7 +326,8 @@ StackFrame* StackwalkerARM64::GetCallerFrame(const CallStack* stack,
   if (TerminateWalk(frame->context.iregs[MD_CONTEXT_ARM64_REG_PC],
                     frame->context.iregs[MD_CONTEXT_ARM64_REG_SP],
                     last_frame->context.iregs[MD_CONTEXT_ARM64_REG_SP],
-                    frames.size() == 1)) {
+                    /*first_unwind=*/last_frame->trust ==
+                        StackFrame::FRAME_TRUST_CONTEXT)) {
     return NULL;
   }
 

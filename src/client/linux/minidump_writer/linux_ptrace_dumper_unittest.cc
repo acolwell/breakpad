@@ -1,5 +1,4 @@
-// Copyright (c) 2009, Google Inc.
-// All rights reserved.
+// Copyright 2009 Google LLC
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -11,7 +10,7 @@
 // copyright notice, this list of conditions and the following disclaimer
 // in the documentation and/or other materials provided with the
 // distribution.
-//     * Neither the name of Google Inc. nor the names of its
+//     * Neither the name of Google LLC nor the names of its
 // contributors may be used to endorse or promote products derived from
 // this software without specific prior written permission.
 //
@@ -33,16 +32,20 @@
 // This file was renamed from linux_dumper_unittest.cc and modified due
 // to LinuxDumper being splitted into two classes.
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>  // Must come first
+#endif
+
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <unistd.h>
 #include <signal.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
-#include <sys/poll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -63,6 +66,8 @@
 #endif
 
 using namespace google_breakpad;
+using google_breakpad::elf::FileID;
+using google_breakpad::elf::kDefaultBuildIdSize;
 
 namespace {
 
@@ -337,7 +342,7 @@ TEST_F(LinuxPtraceDumperChildTest, MappingsIncludeLinuxGate) {
   ASSERT_TRUE(dumper.Init());
 
   void* linux_gate_loc =
-    reinterpret_cast<void *>(dumper.auxv()[AT_SYSINFO_EHDR]);
+    reinterpret_cast<void*>(dumper.auxv()[AT_SYSINFO_EHDR]);
   ASSERT_TRUE(linux_gate_loc);
   bool found_linux_gate = false;
 
@@ -462,6 +467,9 @@ TEST(LinuxPtraceDumperTest, VerifyStackReadWithMultipleThreads) {
 #elif defined(__mips__)
     pid_t* process_tid_location =
         reinterpret_cast<pid_t*>(one_thread.mcontext.gregs[1]);
+#elif defined(__riscv)
+    pid_t* process_tid_location =
+        reinterpret_cast<pid_t*>(one_thread.mcontext.__gregs[4]);
 #else
 #error This test has not been ported to this platform.
 #endif
@@ -559,6 +567,8 @@ TEST_F(LinuxPtraceDumperTest, SanitizeStackCopy) {
   uintptr_t heap_addr = thread_info.regs.rcx;
 #elif defined(__mips__)
   uintptr_t heap_addr = thread_info.mcontext.gregs[1];
+#elif defined(__riscv)
+  uintptr_t heap_addr = thread_info.mcontext.__gregs[4];
 #else
 #error This test has not been ported to this platform.
 #endif
