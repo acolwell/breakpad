@@ -1,7 +1,6 @@
 ## Process this file with automake to produce Makefile.in
 
-# Copyright (c) 2011, Google Inc.
-# All rights reserved.
+# Copyright 2011 Google LLC
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -13,7 +12,7 @@
 # copyright notice, this list of conditions and the following disclaimer
 # in the documentation and/or other materials provided with the
 # distribution.
-#     * Neither the name of Google Inc. nor the names of its
+#     * Neither the name of Google LLC nor the names of its
 # contributors may be used to endorse or promote products derived from
 # this software without specific prior written permission.
 #
@@ -131,18 +130,39 @@ TEST_LIBS = src/testing/libtesting.a
 TEST_DEPS = $(TEST_LIBS)
 endif
 
+
+## Setup test driver
+if ANDROID_HOST
+# Since Autotools 1.2, tests are run through a special "test driver" script.
+# Unfortunately, it's not possible anymore to specify an alternative shell to
+# run them on connected devices, so use a slightly modified version of the
+# driver for Android.
+LOG_DRIVER = $(top_srcdir)/android/test-driver
+else
+if TESTS_AS_ROOT
+LOG_DRIVER = $(top_srcdir)/autotools/root-test-driver $(top_srcdir)/autotools/test-driver
+else
+LOG_DRIVER = $(top_srcdir)/autotools/test-driver
+endif !TESTS_AS_ROOT
+endif !ANDROID_HOST
+
 ## Libraries
 check_LIBRARIES =
 noinst_LIBRARIES =
 lib_LIBRARIES =
+libexec_PROGRAMS =
 bin_PROGRAMS =
 check_PROGRAMS =
+noinst_PROGRAMS =
+noinst_SCRIPTS =
 EXTRA_PROGRAMS =
 CLEANFILES =
 
-check_LIBRARIES += src/testing/libtesting.a
-
+#
+# Tests helper library
+#
 if !SYSTEM_TEST_LIBS
+check_LIBRARIES += src/testing/libtesting.a
 src_testing_libtesting_a_SOURCES = \
 	src/breakpad_googletest_includes.h \
 	src/testing/googletest/src/gtest-all.cc \
@@ -152,59 +172,183 @@ src_testing_libtesting_a_CPPFLAGS = \
 	$(AM_CPPFLAGS) $(TEST_CFLAGS)
 endif
 
+#
+# General
+# Not specific to processor, client or tools
+#
+
+check_PROGRAMS += src/common/safe_math_unittest
+
+
+#
+# Breakpad minidump and microdump
+# processor library, tools and tests
+#
 if !DISABLE_PROCESSOR
+
 lib_LIBRARIES += src/libbreakpad.a
 pkgconfig_DATA += breakpad.pc
 noinst_LIBRARIES += src/third_party/libdisasm/libdisasm.a
+
+## Programs
+bin_PROGRAMS += \
+	src/processor/microdump_stackwalk \
+	src/processor/minidump_dump \
+	src/processor/minidump_stackwalk
+
+# MINGW
+if WINDOWS_HOST
+if !DISABLE_TOOLS
+bin_PROGRAMS += \
+       src/tools/windows/dump_syms_dwarf/dump_syms
+endif
 endif
 
+## Tests (binaries)
+check_PROGRAMS += \
+	src/common/test_assembler_unittest \
+	src/common/dwarf/dwarf2reader_lineinfo_unittest \
+	src/common/dwarf/dwarf2reader_splitfunctions_unittest \
+	src/processor/address_map_unittest \
+	src/processor/basic_source_line_resolver_unittest \
+	src/processor/cfi_frame_info_unittest \
+	src/processor/contained_range_map_unittest \
+	src/processor/disassembler_x86_unittest \
+	src/processor/exploitability_unittest \
+	src/processor/fast_source_line_resolver_unittest \
+	src/processor/map_serializers_unittest \
+	src/processor/microdump_processor_unittest \
+	src/processor/minidump_processor_unittest \
+	src/processor/minidump_unittest \
+	src/processor/static_address_map_unittest \
+	src/processor/static_contained_range_map_unittest \
+	src/processor/static_map_unittest \
+	src/processor/static_range_map_unittest \
+	src/processor/pathname_stripper_unittest \
+	src/processor/postfix_evaluator_unittest \
+	src/processor/proc_maps_linux_unittest \
+	src/processor/range_map_truncate_lower_unittest \
+	src/processor/range_map_truncate_upper_unittest \
+	src/processor/range_map_unittest \
+	src/processor/stackwalker_amd64_unittest \
+	src/processor/stackwalker_arm_unittest \
+	src/processor/stackwalker_arm64_unittest \
+	src/processor/stackwalker_address_list_unittest \
+	src/processor/stackwalker_mips_unittest \
+	src/processor/stackwalker_mips64_unittest \
+	src/processor/stackwalker_riscv_unittest \
+	src/processor/stackwalker_riscv64_unittest \
+	src/processor/stackwalker_x86_unittest \
+	src/processor/synth_minidump_unittest
 if LINUX_HOST
+check_PROGRAMS += \
+	src/processor/disassembler_objdump_unittest \
+	src/common/linux/scoped_pipe_unittest \
+	src/common/linux/scoped_tmpfile_unittest
+endif LINUX_HOST
+if SELFTEST
+check_PROGRAMS += \
+	src/processor/stackwalker_selftest
+endif SELFTEST
+
+## Tests (scripts)
+check_SCRIPTS = \
+	src/processor/microdump_stackwalk_test \
+	src/processor/microdump_stackwalk_machine_readable_test \
+	src/processor/minidump_dump_test \
+	src/processor/minidump_stackwalk_test \
+	src/processor/minidump_stackwalk_machine_readable_test
+
+endif !DISABLE_PROCESSOR
+
+
+#
+# Breakpad client library and tests
+#
+# Currently Linux only, the macOS client
+# is built using an Xcode project instead.
+#
+if LINUX_HOST
+
 lib_LIBRARIES += src/client/linux/libbreakpad_client.a
 pkgconfig_DATA += breakpad-client.pc
 
-src_client_linux_libbreakpad_client_a_SOURCES = \
-	src/client/linux/crash_generation/crash_generation_client.cc \
-	src/client/linux/crash_generation/crash_generation_server.cc \
-	src/client/linux/dump_writer_common/thread_info.cc \
-	src/client/linux/dump_writer_common/ucontext_reader.cc \
-	src/client/linux/handler/exception_handler.cc \
-	src/client/linux/handler/exception_handler.h \
-	src/client/linux/handler/minidump_descriptor.cc \
-	src/client/linux/handler/minidump_descriptor.h \
-	src/client/linux/log/log.cc \
-	src/client/linux/log/log.h \
-	src/client/linux/microdump_writer/microdump_writer.cc \
-	src/client/linux/microdump_writer/microdump_writer.h \
-	src/client/linux/minidump_writer/linux_core_dumper.cc \
-	src/client/linux/minidump_writer/linux_dumper.cc \
-	src/client/linux/minidump_writer/linux_ptrace_dumper.cc \
-	src/client/linux/minidump_writer/minidump_writer.cc \
-	src/client/minidump_file_writer-inl.h \
-	src/client/minidump_file_writer.cc \
-	src/client/minidump_file_writer.h \
-	src/common/convert_UTF.c \
-	src/common/convert_UTF.h \
-	src/common/md5.cc \
-	src/common/md5.h \
-	src/common/string_conversion.cc \
-	src/common/string_conversion.h \
-	src/common/linux/elf_core_dump.cc \
-	src/common/linux/elfutils.cc \
-	src/common/linux/elfutils.h \
-	src/common/linux/file_id.cc \
-	src/common/linux/file_id.h \
-	src/common/linux/guid_creator.cc \
-	src/common/linux/guid_creator.h \
-	src/common/linux/linux_libc_support.cc \
-	src/common/linux/memory_mapped_file.cc \
-	src/common/linux/safe_readlink.cc
-if ANDROID_HOST
-src_client_linux_libbreakpad_client_a_SOURCES += \
-	src/common/android/breakpad_getcontext.S
-endif
+check_PROGRAMS += \
+	src/client/linux/linux_client_unittest \
+	src/common/linux/google_crashdump_uploader_test
+
+EXTRA_PROGRAMS += \
+	src/client/linux/linux_dumper_unittest_helper \
+	src/client/linux/linux_client_unittest_shlib
+
+CLEANFILES += \
+	src/client/linux/linux_dumper_unittest_helper \
+	src/client/linux/linux_client_unittest_shlib
+
 endif LINUX_HOST
 
-if !DISABLE_PROCESSOR
+
+#
+# Various Breakpad tools
+# This includes symbol dumpers and uploaders
+#
+if !DISABLE_TOOLS
+
+if LINUX_HOST
+
+bin_PROGRAMS += \
+	src/tools/linux/core2md/core2md \
+	src/tools/linux/pid2md/pid2md \
+	src/tools/linux/dump_syms/dump_syms \
+	src/tools/linux/md2core/minidump-2-core \
+	src/tools/linux/symupload/minidump_upload \
+	src/tools/linux/symupload/sym_upload
+if X86_HOST
+bin_PROGRAMS += \
+	src/tools/mac/dump_syms/dump_syms_mac
+endif
+if HAVE_MEMFD_CREATE
+libexec_PROGRAMS += \
+	src/tools/linux/core_handler/core_handler
+endif
+
+check_PROGRAMS += \
+	src/common/dumper_unittest \
+	src/tools/linux/md2core/minidump_2_core_unittest
+if X86_HOST
+check_PROGRAMS += \
+	src/common/mac/macho_reader_unittest
+endif
+
+endif LINUX_HOST
+
+endif !DISABLE_TOOLS
+
+TESTS = $(check_PROGRAMS) $(check_SCRIPTS)
+
+## Non-installables
+noinst_SCRIPTS += $(check_SCRIPTS)
+
+
+## Target definitions
+
+# All targets that were defined above should now be
+# declared below. This should be done unconditionally
+# so DO NOT wrap them in conditions!
+# Execept for conditionally adding a specific file or
+# flag that should only be added for a specific arch,
+# system, etc.
+
+src_common_safe_math_unittest_SOURCES = \
+	src/common/safe_math.h \
+	src/common/safe_math_unittest.cc
+src_common_safe_math_unittest_CPPFLAGS = \
+	$(AM_CPPFLAGS) $(TEST_CFLAGS)
+src_common_safe_math_unittest_LDADD = \
+	$(TEST_LIBS) \
+	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
+
+# Breakpad processor library
 src_libbreakpad_a_SOURCES = \
 	src/google_breakpad/common/breakpad_types.h \
 	src/google_breakpad/common/minidump_format.h \
@@ -289,6 +433,8 @@ src_libbreakpad_a_SOURCES = \
 	src/processor/source_line_resolver_base.cc \
 	src/processor/stack_frame_cpu.cc \
 	src/processor/stack_frame_symbolizer.cc \
+	src/processor/stackwalk_common.cc \
+	src/processor/stackwalk_common.h \
 	src/processor/stackwalker.cc \
 	src/processor/stackwalker_amd64.cc \
 	src/processor/stackwalker_amd64.h \
@@ -304,6 +450,10 @@ src_libbreakpad_a_SOURCES = \
 	src/processor/stackwalker_ppc.h \
 	src/processor/stackwalker_ppc64.cc \
 	src/processor/stackwalker_ppc64.h \
+	src/processor/stackwalker_riscv.cc \
+	src/processor/stackwalker_riscv.h \
+	src/processor/stackwalker_riscv64.cc \
+	src/processor/stackwalker_riscv64.h \
 	src/processor/stackwalker_sparc.cc \
 	src/processor/stackwalker_sparc.h \
 	src/processor/stackwalker_x86.cc \
@@ -322,7 +472,17 @@ src_libbreakpad_a_SOURCES = \
 	src/processor/symbolic_constants_win.h \
 	src/processor/tokenize.cc \
 	src/processor/tokenize.h
+if LINUX_HOST
+src_libbreakpad_a_SOURCES += \
+	src/common/linux/scoped_pipe.h \
+	src/common/linux/scoped_pipe.cc \
+	src/common/linux/scoped_tmpfile.h \
+	src/common/linux/scoped_tmpfile.cc \
+	src/processor/disassembler_objdump.h \
+	src/processor/disassembler_objdump.cc
+endif
 
+# libdisasm 3rd party library
 src_third_party_libdisasm_libdisasm_a_SOURCES = \
 	src/third_party/libdisasm/ia32_implicit.c \
 	src/third_party/libdisasm/ia32_implicit.h \
@@ -351,131 +511,50 @@ src_third_party_libdisasm_libdisasm_a_SOURCES = \
 	src/third_party/libdisasm/x86_operand_list.c \
 	src/third_party/libdisasm/x86_operand_list.h
 
-## Programs
-bin_PROGRAMS += \
-	src/processor/microdump_stackwalk \
-	src/processor/minidump_dump \
-	src/processor/minidump_stackwalk
-endif !DISABLE_PROCESSOR
-
-if LINUX_HOST
-EXTRA_PROGRAMS += \
-	src/client/linux/linux_dumper_unittest_helper
-CLEANFILES += \
-	src/client/linux/linux_dumper_unittest_helper
-
-if !DISABLE_TOOLS
-bin_PROGRAMS += \
-	src/tools/linux/core2md/core2md \
-	src/tools/linux/dump_syms/dump_syms \
-	src/tools/linux/md2core/minidump-2-core \
-	src/tools/linux/symupload/minidump_upload \
-	src/tools/linux/symupload/sym_upload
-if X86_HOST
-bin_PROGRAMS += \
-	src/tools/mac/dump_syms/dump_syms_mac
-endif
-endif
-endif LINUX_HOST
-
-# MINGW
-if WINDOWS_HOST
-if !DISABLE_TOOLS
-bin_PROGRAMS += \
-       src/tools/windows/dump_syms_dwarf/dump_syms
-endif
-endif
-
-## Tests
-if !DISABLE_PROCESSOR
-check_PROGRAMS += \
-	src/common/test_assembler_unittest \
-	src/processor/address_map_unittest \
-	src/processor/basic_source_line_resolver_unittest \
-	src/processor/cfi_frame_info_unittest \
-	src/processor/contained_range_map_unittest \
-	src/processor/disassembler_x86_unittest \
-	src/processor/exploitability_unittest \
-	src/processor/fast_source_line_resolver_unittest \
-	src/processor/map_serializers_unittest \
-	src/processor/microdump_processor_unittest \
-	src/processor/minidump_processor_unittest \
-	src/processor/minidump_unittest \
-	src/processor/static_address_map_unittest \
-	src/processor/static_contained_range_map_unittest \
-	src/processor/static_map_unittest \
-	src/processor/static_range_map_unittest \
-	src/processor/pathname_stripper_unittest \
-	src/processor/postfix_evaluator_unittest \
-	src/processor/proc_maps_linux_unittest \
-	src/processor/range_map_truncate_lower_unittest \
-	src/processor/range_map_truncate_upper_unittest \
-	src/processor/range_map_unittest \
-	src/processor/stackwalker_amd64_unittest \
-	src/processor/stackwalker_arm_unittest \
-	src/processor/stackwalker_arm64_unittest \
-	src/processor/stackwalker_address_list_unittest \
-	src/processor/stackwalker_mips_unittest \
-	src/processor/stackwalker_mips64_unittest \
-	src/processor/stackwalker_x86_unittest \
-	src/processor/synth_minidump_unittest
+# Breakpad client
+src_client_linux_libbreakpad_client_a_SOURCES = \
+	src/client/linux/crash_generation/crash_generation_client.cc \
+	src/client/linux/crash_generation/crash_generation_server.cc \
+	src/client/linux/dump_writer_common/thread_info.cc \
+	src/client/linux/dump_writer_common/ucontext_reader.cc \
+	src/client/linux/handler/exception_handler.cc \
+	src/client/linux/handler/exception_handler.h \
+	src/client/linux/handler/minidump_descriptor.cc \
+	src/client/linux/handler/minidump_descriptor.h \
+	src/client/linux/log/log.cc \
+	src/client/linux/log/log.h \
+	src/client/linux/microdump_writer/microdump_writer.cc \
+	src/client/linux/microdump_writer/microdump_writer.h \
+	src/client/linux/minidump_writer/linux_core_dumper.cc \
+	src/client/linux/minidump_writer/linux_dumper.cc \
+	src/client/linux/minidump_writer/linux_ptrace_dumper.cc \
+	src/client/linux/minidump_writer/minidump_writer.cc \
+	src/client/linux/minidump_writer/pe_file.cc \
+	src/client/minidump_file_writer-inl.h \
+	src/client/minidump_file_writer.cc \
+	src/client/minidump_file_writer.h \
+	src/common/convert_UTF.cc \
+	src/common/convert_UTF.h \
+	src/common/md5.cc \
+	src/common/md5.h \
+	src/common/string_conversion.cc \
+	src/common/string_conversion.h \
+	src/common/linux/elf_core_dump.cc \
+	src/common/linux/elfutils.cc \
+	src/common/linux/elfutils.h \
+	src/common/linux/file_id.cc \
+	src/common/linux/file_id.h \
+	src/common/linux/guid_creator.cc \
+	src/common/linux/guid_creator.h \
+	src/common/linux/linux_libc_support.cc \
+	src/common/linux/memory_mapped_file.cc \
+	src/common/linux/safe_readlink.cc
+if !HAVE_GETCONTEXT
+src_client_linux_libbreakpad_client_a_SOURCES += \
+	src/common/linux/breakpad_getcontext.S
 endif
 
-if LINUX_HOST
-EXTRA_PROGRAMS += \
-	src/client/linux/linux_client_unittest_shlib
-CLEANFILES += \
-	src/client/linux/linux_client_unittest_shlib
-
-check_PROGRAMS += \
-	src/client/linux/linux_client_unittest \
-	src/common/linux/google_crashdump_uploader_test
-
-if !DISABLE_TOOLS
-check_PROGRAMS += \
-	src/common/dumper_unittest \
-	src/tools/linux/md2core/minidump_2_core_unittest
-if X86_HOST
-check_PROGRAMS += \
-	src/common/mac/macho_reader_unittest
-endif
-endif
-endif LINUX_HOST
-
-if !DISABLE_PROCESSOR
-if SELFTEST
-check_PROGRAMS += \
-	src/processor/stackwalker_selftest
-endif SELFTEST
-endif !DISABLE_PROCESSOR
-
-if !DISABLE_PROCESSOR
-check_SCRIPTS = \
-	src/processor/microdump_stackwalk_test \
-	src/processor/microdump_stackwalk_machine_readable_test \
-	src/processor/minidump_dump_test \
-	src/processor/minidump_stackwalk_test \
-	src/processor/minidump_stackwalk_machine_readable_test
-endif
-
-TESTS = $(check_PROGRAMS) $(check_SCRIPTS)
-
-if ANDROID_HOST
-# Since Autotools 1.2, tests are run through a special "test driver" script.
-# Unfortunately, it's not possible anymore to specify an alternative shell to
-# run them on connected devices, so use a slightly modified version of the
-# driver for Android.
-LOG_DRIVER = $(top_srcdir)/android/test-driver
-else
-# The default Autotools test driver script.
-if TESTS_AS_ROOT
-LOG_DRIVER = $(top_srcdir)/autotools/root-test-driver $(top_srcdir)/autotools/test-driver
-else
-LOG_DRIVER = $(top_srcdir)/autotools/test-driver
-endif !TESTS_AS_ROOT
-endif !ANDROID_HOST
-
-if LINUX_HOST
+# Client tests
 src_client_linux_linux_dumper_unittest_helper_SOURCES = \
 	src/client/linux/minidump_writer/linux_dumper_unittest_helper.cc
 src_client_linux_linux_dumper_unittest_helper_LDFLAGS=$(PTHREAD_CFLAGS)
@@ -491,6 +570,7 @@ endif
 src_client_linux_linux_client_unittest_shlib_SOURCES = \
 	$(src_testing_libtesting_a_SOURCES) \
 	src/client/linux/handler/exception_handler_unittest.cc \
+	src/client/linux/microdump_writer/microdump_writer_unittest.cc \
 	src/client/linux/minidump_writer/directory_reader_unittest.cc \
 	src/client/linux/minidump_writer/cpu_set_unittest.cc \
 	src/client/linux/minidump_writer/line_reader_unittest.cc \
@@ -499,10 +579,14 @@ src_client_linux_linux_client_unittest_shlib_SOURCES = \
 	src/client/linux/minidump_writer/linux_ptrace_dumper_unittest.cc \
 	src/client/linux/minidump_writer/minidump_writer_unittest.cc \
 	src/client/linux/minidump_writer/minidump_writer_unittest_utils.cc \
+	src/client/linux/minidump_writer/pe_file.cc \
 	src/client/linux/minidump_writer/proc_cpuinfo_reader_unittest.cc \
 	src/common/linux/elf_core_dump.cc \
 	src/common/linux/linux_libc_support_unittest.cc \
-	src/common/linux/tests/auto_testfile.h \
+	src/common/linux/scoped_pipe.h \
+	src/common/linux/scoped_pipe.cc \
+	src/common/linux/scoped_tmpfile.h \
+	src/common/linux/scoped_tmpfile.cc \
 	src/common/linux/tests/crash_generator.cc \
 	src/common/memory_allocator_unittest.cc \
 	src/common/tests/auto_tempdir.h \
@@ -516,13 +600,9 @@ src_client_linux_linux_client_unittest_shlib_SOURCES = \
 	src/processor/minidump.cc \
 	src/processor/pathname_stripper.cc \
 	src/processor/proc_maps_linux.cc
-if ANDROID_HOST
+if !HAVE_GETCONTEXT
 src_client_linux_linux_client_unittest_shlib_SOURCES += \
-	src/common/android/breakpad_getcontext.S
-endif
-if LINUX_HOST
-src_client_linux_linux_client_unittest_shlib_SOURCES += \
-	src/client/linux/microdump_writer/microdump_writer_unittest.cc
+	src/common/linux/breakpad_getcontext.S
 endif
 
 src_client_linux_linux_client_unittest_shlib_CPPFLAGS = \
@@ -553,9 +633,11 @@ src_client_linux_linux_client_unittest_shlib_LDADD = \
 	src/common/string_conversion.o \
 	$(TEST_LIBS) \
 	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
-if ANDROID_HOST
+if !HAVE_GETCONTEXT
 src_client_linux_linux_client_unittest_shlib_SOURCES += \
-	src/common/android/breakpad_getcontext_unittest.cc
+	src/common/linux/breakpad_getcontext_unittest.cc
+endif
+if ANDROID_HOST
 src_client_linux_linux_client_unittest_shlib_LDFLAGS += \
 	-llog -lm
 endif
@@ -583,12 +665,28 @@ src_client_linux_linux_client_unittest_LDADD = \
 src_client_linux_linux_client_unittest_DEPENDENCIES = \
 	src/client/linux/linux_client_unittest_shlib
 
-if !DISABLE_TOOLS
+# Tools
+
 src_tools_linux_core2md_core2md_SOURCES = \
 	src/tools/linux/core2md/core2md.cc
 
 src_tools_linux_core2md_core2md_LDADD = \
-	src/client/linux/libbreakpad_client.a
+	src/client/linux/libbreakpad_client.a \
+	src/common/path_helper.o
+
+src_tools_linux_core_handler_core_handler_SOURCES = \
+	src/tools/linux/core_handler/core_handler.cc
+
+src_tools_linux_core_handler_core_handler_LDADD = \
+	src/client/linux/libbreakpad_client.a \
+	src/common/path_helper.o
+
+src_tools_linux_pid2md_pid2md_SOURCES = \
+	src/tools/linux/pid2md/pid2md.cc
+
+src_tools_linux_pid2md_pid2md_LDADD = \
+	src/client/linux/libbreakpad_client.a \
+	src/common/path_helper.o
 
 src_tools_linux_dump_syms_dump_syms_SOURCES = \
 	src/common/dwarf_cfi_to_module.cc \
@@ -616,9 +714,10 @@ src_tools_linux_dump_syms_dump_syms_SOURCES = \
 	src/common/linux/safe_readlink.cc \
 	src/tools/linux/dump_syms/dump_syms.cc
 src_tools_linux_dump_syms_dump_syms_CXXFLAGS = \
-	$(RUST_DEMANGLE_CFLAGS)
+	$(RUSTC_DEMANGLE_CFLAGS)
 src_tools_linux_dump_syms_dump_syms_LDADD = \
-	$(RUST_DEMANGLE_LIBS)
+	$(RUSTC_DEMANGLE_LIBS) \
+	-lz
 
 src_tools_linux_md2core_minidump_2_core_SOURCES = \
 	src/common/linux/memory_mapped_file.cc \
@@ -628,14 +727,20 @@ src_tools_linux_md2core_minidump_2_core_SOURCES = \
 
 src_tools_linux_symupload_minidump_upload_SOURCES = \
 	src/common/linux/http_upload.cc \
+	src/common/path_helper.cc \
 	src/tools/linux/symupload/minidump_upload.cc
 src_tools_linux_symupload_minidump_upload_LDADD = -ldl
 
 src_tools_linux_symupload_sym_upload_SOURCES = \
 	src/common/linux/http_upload.cc \
 	src/common/linux/http_upload.h \
+	src/common/linux/libcurl_wrapper.cc \
+	src/common/linux/libcurl_wrapper.h \
+	src/common/linux/symbol_collector_client.cc \
+	src/common/linux/symbol_collector_client.h \
 	src/common/linux/symbol_upload.cc \
 	src/common/linux/symbol_upload.h \
+	src/common/path_helper.cc \
 	src/tools/linux/symupload/sym_upload.cc
 src_tools_linux_symupload_sym_upload_LDADD = -ldl
 
@@ -670,14 +775,36 @@ src_tools_mac_dump_syms_dump_syms_mac_SOURCES = \
 	src/tools/mac/dump_syms/dump_syms_tool.cc
 src_tools_mac_dump_syms_dump_syms_mac_CXXFLAGS= \
 	-I$(top_srcdir)/src/third_party/mac_headers \
-	$(RUST_DEMANGLE_CFLAGS) \
+	$(RUSTC_DEMANGLE_CFLAGS) \
 	-DHAVE_MACH_O_NLIST_H
 src_tools_mac_dump_syms_dump_syms_mac_LDADD= \
-	$(RUST_DEMANGLE_LIBS)
+	$(RUSTC_DEMANGLE_LIBS)
+
+# MINGW
+if WINDOWS_HOST
+if !DISABLE_TOOLS
+src_tools_windows_dump_syms_dwarf_dump_syms_SOURCES = \
+       src/common/dwarf_cfi_to_module.cc \
+       src/common/dwarf_cu_to_module.cc \
+       src/common/dwarf_line_to_module.cc \
+       src/common/dwarf_range_list_handler.cc \
+       src/common/language.cc \
+       src/common/module.cc \
+       src/common/dwarf/bytereader.cc \
+       src/common/dwarf/dwarf2diehandler.cc \
+       src/common/dwarf/dwarf2reader.cc \
+       src/common/dwarf/elf_reader.cc \
+       src/common/pecoff/dump_symbols.cc \
+       src/common/pecoff/pecoffutils.cc \
+       src/common/pecoff/pecoff_file_id.cc \
+       src/tools/windows/dump_syms_dwarf/dump_syms.cc
+src_tools_windows_dump_syms_dwarf_dump_syms_LDADD = -lws2_32
+endif !DISABLE_TOOLS
+endif WINDOWS_HOST
 
 src_common_dumper_unittest_SOURCES = \
 	src/common/byte_cursor_unittest.cc \
-	src/common/convert_UTF.c \
+	src/common/convert_UTF.cc \
 	src/common/dwarf_cfi_to_module.cc \
 	src/common/dwarf_cfi_to_module_unittest.cc \
 	src/common/dwarf_cu_to_module.cc \
@@ -735,12 +862,13 @@ src_common_dumper_unittest_SOURCES = \
 	src/common/tests/file_utils.cc
 src_common_dumper_unittest_CPPFLAGS = \
 	$(AM_CPPFLAGS) $(TEST_CFLAGS) \
-	$(RUST_DEMANGLE_CFLAGS) \
+	$(RUSTC_DEMANGLE_CFLAGS) \
 	$(PTHREAD_CFLAGS)
 src_common_dumper_unittest_LDADD = \
 	$(TEST_LIBS) \
-	$(RUST_DEMANGLE_LIBS) \
-	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
+	$(RUSTC_DEMANGLE_LIBS) \
+	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS) \
+	-lz
 
 src_common_mac_macho_reader_unittest_SOURCES = \
 	src/common/dwarf_cfi_to_module.cc \
@@ -774,7 +902,6 @@ src_common_mac_macho_reader_unittest_CPPFLAGS = \
 src_common_mac_macho_reader_unittest_LDADD = \
 	$(TEST_LIBS) \
 	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
-endif
 
 src_common_linux_google_crashdump_uploader_test_SOURCES = \
 	src/common/linux/google_crashdump_uploader.cc \
@@ -795,31 +922,6 @@ src_tools_linux_md2core_minidump_2_core_unittest_LDADD = \
 	$(TEST_LIBS) \
 	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
 
-endif LINUX_HOST
-
-# MINGW
-if WINDOWS_HOST
-if !DISABLE_TOOLS
-src_tools_windows_dump_syms_dwarf_dump_syms_SOURCES = \
-       src/common/dwarf_cfi_to_module.cc \
-       src/common/dwarf_cu_to_module.cc \
-       src/common/dwarf_line_to_module.cc \
-       src/common/dwarf_range_list_handler.cc \
-       src/common/language.cc \
-       src/common/module.cc \
-       src/common/dwarf/bytereader.cc \
-       src/common/dwarf/dwarf2diehandler.cc \
-       src/common/dwarf/dwarf2reader.cc \
-       src/common/dwarf/elf_reader.cc \
-       src/common/pecoff/dump_symbols.cc \
-       src/common/pecoff/pecoffutils.cc \
-       src/common/pecoff/pecoff_file_id.cc \
-       src/tools/windows/dump_syms_dwarf/dump_syms.cc
-src_tools_windows_dump_syms_dwarf_dump_syms_LDADD = -lws2_32
-endif !DISABLE_TOOLS
-endif WINDOWS_HOST
-
-if !DISABLE_PROCESSOR
 src_processor_address_map_unittest_SOURCES = \
 	src/processor/address_map_unittest.cc
 src_processor_address_map_unittest_LDADD = \
@@ -891,11 +993,52 @@ src_processor_exploitability_unittest_LDADD = \
 	src/processor/stackwalker_mips.o \
 	src/processor/stackwalker_ppc.o \
 	src/processor/stackwalker_ppc64.o \
+	src/processor/stackwalker_riscv.o \
+	src/processor/stackwalker_riscv64.o \
 	src/processor/stackwalker_sparc.o \
 	src/processor/stackwalker_x86.o \
 	src/processor/symbolic_constants_win.o \
 	src/processor/tokenize.o \
 	src/third_party/libdisasm/libdisasm.a \
+	$(TEST_LIBS) \
+	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
+if LINUX_HOST
+src_processor_exploitability_unittest_LDADD += \
+	src/common/linux/scoped_pipe.o \
+	src/common/linux/scoped_tmpfile.o \
+	src/processor/disassembler_objdump.o
+endif
+
+src_common_linux_scoped_pipe_unittest_SOURCES = \
+	src/common/linux/scoped_pipe_unittest.cc
+src_common_linux_scoped_pipe_unittest_CPPFLAGS = \
+	$(AM_CPPFLAGS) $(TEST_CFLAGS)
+src_common_linux_scoped_pipe_unittest_LDADD = \
+	src/common/linux/scoped_pipe.o \
+	$(TEST_LIBS) \
+	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
+
+src_common_linux_scoped_tmpfile_unittest_SOURCES = \
+	src/common/linux/scoped_tmpfile_unittest.cc
+src_common_linux_scoped_tmpfile_unittest_CPPFLAGS = \
+	$(AM_CPPFLAGS) $(TEST_CFLAGS)
+src_common_linux_scoped_tmpfile_unittest_LDADD = \
+	src/common/linux/scoped_tmpfile.o \
+	$(TEST_LIBS) \
+	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
+
+src_processor_disassembler_objdump_unittest_SOURCES = \
+	src/processor/disassembler_objdump_unittest.cc
+src_processor_disassembler_objdump_unittest_CPPFLAGS = \
+	$(AM_CPPFLAGS) $(TEST_CFLAGS)
+src_processor_disassembler_objdump_unittest_LDADD = \
+	src/common/linux/scoped_pipe.o \
+	src/common/linux/scoped_tmpfile.o \
+	src/processor/disassembler_objdump.o \
+	src/processor/dump_context.o \
+	src/processor/dump_object.o \
+	src/processor/logging.o \
+	src/processor/pathname_stripper.o \
 	$(TEST_LIBS) \
 	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
 
@@ -964,11 +1107,19 @@ src_processor_microdump_processor_unittest_LDADD = \
 	src/processor/stackwalker_mips.o \
 	src/processor/stackwalker_ppc.o \
 	src/processor/stackwalker_ppc64.o \
+	src/processor/stackwalker_riscv.o \
+	src/processor/stackwalker_riscv64.o \
 	src/processor/stackwalker_sparc.o \
 	src/processor/stackwalker_x86.o \
 	src/processor/tokenize.o \
 	$(TEST_LIBS) \
 	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
+if LINUX_HOST
+src_processor_microdump_processor_unittest_LDADD += \
+	src/common/linux/scoped_pipe.o \
+	src/common/linux/scoped_tmpfile.o \
+	src/processor/disassembler_objdump.o
+endif
 
 src_processor_minidump_processor_unittest_SOURCES = \
 	src/processor/minidump_processor_unittest.cc
@@ -1003,6 +1154,8 @@ src_processor_minidump_processor_unittest_LDADD = \
 	src/processor/stackwalker_mips.o \
 	src/processor/stackwalker_ppc.o \
 	src/processor/stackwalker_ppc64.o \
+	src/processor/stackwalker_riscv.o \
+	src/processor/stackwalker_riscv64.o \
 	src/processor/stackwalker_sparc.o \
 	src/processor/stackwalker_x86.o \
 	src/processor/symbolic_constants_win.o \
@@ -1010,6 +1163,12 @@ src_processor_minidump_processor_unittest_LDADD = \
 	src/third_party/libdisasm/libdisasm.a \
 	$(TEST_LIBS) \
 	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
+if LINUX_HOST
+src_processor_minidump_processor_unittest_LDADD += \
+	src/common/linux/scoped_pipe.o \
+	src/common/linux/scoped_tmpfile.o \
+	src/processor/disassembler_objdump.o
+endif
 
 src_processor_minidump_unittest_SOURCES = \
 	src/common/test_assembler.cc \
@@ -1146,10 +1305,18 @@ src_processor_stackwalker_selftest_LDADD = \
 	src/processor/stackwalker_mips.o \
 	src/processor/stackwalker_ppc.o \
 	src/processor/stackwalker_ppc64.o \
+	src/processor/stackwalker_riscv.o \
+	src/processor/stackwalker_riscv64.o \
 	src/processor/stackwalker_sparc.o \
 	src/processor/stackwalker_x86.o \
 	src/processor/tokenize.o \
 	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
+if LINUX_HOST
+src_processor_stackwalker_selftest_LDADD += \
+	src/common/linux/scoped_pipe.o \
+	src/common/linux/scoped_tmpfile.o \
+	src/processor/disassembler_objdump.o
+endif
 
 src_processor_stackwalker_amd64_unittest_SOURCES = \
 	src/common/test_assembler.cc \
@@ -1211,6 +1378,26 @@ src_processor_stackwalker_mips64_unittest_LDADD = \
 src_processor_stackwalker_mips64_unittest_CPPFLAGS = \
 	$(AM_CPPFLAGS) $(TEST_CFLAGS)
 
+src_processor_stackwalker_riscv_unittest_SOURCES = \
+	src/common/test_assembler.cc \
+	src/processor/stackwalker_riscv_unittest.cc
+src_processor_stackwalker_riscv_unittest_LDADD = \
+	src/libbreakpad.a \
+	$(TEST_LIBS) \
+	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
+src_processor_stackwalker_riscv_unittest_CPPFLAGS = \
+	$(AM_CPPFLAGS) $(TEST_CFLAGS)
+
+src_processor_stackwalker_riscv64_unittest_SOURCES = \
+	src/common/test_assembler.cc \
+	src/processor/stackwalker_riscv64_unittest.cc
+src_processor_stackwalker_riscv64_unittest_LDADD = \
+	src/libbreakpad.a \
+	$(TEST_LIBS) \
+	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
+src_processor_stackwalker_riscv64_unittest_CPPFLAGS = \
+	$(AM_CPPFLAGS) $(TEST_CFLAGS)
+
 src_processor_stackwalker_x86_unittest_SOURCES = \
 	src/common/test_assembler.cc \
 	src/processor/stackwalker_x86_unittest.cc
@@ -1243,13 +1430,34 @@ src_common_test_assembler_unittest_LDADD = \
 	$(TEST_LIBS) \
 	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
 
-## Non-installables
-noinst_PROGRAMS =
-noinst_SCRIPTS = $(check_SCRIPTS)
+src_common_dwarf_dwarf2reader_lineinfo_unittest_SOURCES = \
+	src/common/dwarf/dwarf2reader.h \
+	src/common/dwarf/dwarf2reader_lineinfo_unittest.cc
+src_common_dwarf_dwarf2reader_lineinfo_unittest_CPPFLAGS = \
+	$(AM_CPPFLAGS) $(TEST_CFLAGS)
+src_common_dwarf_dwarf2reader_lineinfo_unittest_LDADD = \
+  src/common/dwarf/bytereader.o \
+  src/common/dwarf/dwarf2reader.o \
+  src/common/dwarf/elf_reader.o \
+	$(TEST_LIBS) \
+	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
+
+src_common_dwarf_dwarf2reader_splitfunctions_unittest_SOURCES = \
+	src/common/dwarf/dwarf2reader.h \
+	src/common/dwarf/dwarf2reader_splitfunctions_unittest.cc
+src_common_dwarf_dwarf2reader_splitfunctions_unittest_CPPFLAGS = \
+	$(AM_CPPFLAGS) $(TEST_CFLAGS)
+src_common_dwarf_dwarf2reader_splitfunctions_unittest_LDADD = \
+  src/common/dwarf/bytereader.o \
+  src/common/dwarf/dwarf2reader.o \
+  src/common/dwarf/elf_reader.o \
+	$(TEST_LIBS) \
+	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
 
 src_processor_minidump_dump_SOURCES = \
 	src/processor/minidump_dump.cc
 src_processor_minidump_dump_LDADD = \
+	src/common/path_helper.o \
 	src/processor/basic_code_modules.o \
 	src/processor/convert_old_arm64_context.o \
 	src/processor/dump_context.o \
@@ -1289,11 +1497,19 @@ src_processor_microdump_stackwalk_LDADD = \
 	src/processor/stackwalker_mips.o \
 	src/processor/stackwalker_ppc.o \
 	src/processor/stackwalker_ppc64.o \
+	src/processor/stackwalker_riscv.o \
+	src/processor/stackwalker_riscv64.o \
 	src/processor/stackwalker_sparc.o \
 	src/processor/stackwalker_x86.o \
 	src/processor/tokenize.o \
 	src/third_party/libdisasm/libdisasm.a \
 	$(LIBZIP_LIBS)
+if LINUX_HOST
+src_processor_microdump_stackwalk_LDADD += \
+	src/common/linux/scoped_pipe.o \
+	src/common/linux/scoped_tmpfile.o \
+	src/processor/disassembler_objdump.o
+endif
 
 src_processor_minidump_stackwalk_SOURCES = \
 	src/processor/minidump_stackwalk.cc
@@ -1329,14 +1545,20 @@ src_processor_minidump_stackwalk_LDADD = \
 	src/processor/stackwalker_mips.o \
 	src/processor/stackwalker_ppc.o \
 	src/processor/stackwalker_ppc64.o \
+	src/processor/stackwalker_riscv.o \
+	src/processor/stackwalker_riscv64.o \
 	src/processor/stackwalker_sparc.o \
 	src/processor/stackwalker_x86.o \
 	src/processor/symbolic_constants_win.o \
 	src/processor/tokenize.o \
 	src/third_party/libdisasm/libdisasm.a \
 	$(LIBZIP_LIBS)
-
-endif !DISABLE_PROCESSOR
+if LINUX_HOST
+src_processor_minidump_stackwalk_LDADD += \
+	src/common/linux/scoped_pipe.o \
+	src/common/linux/scoped_tmpfile.o \
+	src/processor/disassembler_objdump.o
+endif LINUX_HOST
 
 ## Additional files to be included in a source distribution
 ##
@@ -1381,13 +1603,10 @@ EXTRA_DIST = \
 	src/client/solaris/handler/minidump_test.cc \
 	src/client/solaris/handler/solaris_lwp.cc \
 	src/client/solaris/handler/solaris_lwp.h \
-	src/client/windows/breakpad_client.gyp \
 	src/client/windows/handler/exception_handler.cc \
 	src/client/windows/handler/exception_handler.h \
-	src/client/windows/handler/exception_handler.gyp \
 	src/client/windows/sender/crash_report_sender.cc \
 	src/client/windows/sender/crash_report_sender.h \
-	src/client/windows/sender/crash_report_sender.gyp \
 	src/common/dwarf/dwarf2diehandler.h \
 	src/common/dwarf/dwarf2enums.h \
 	src/common/dwarf/line_state_machine.h \
@@ -1460,6 +1679,7 @@ EXTRA_DIST = \
 	src/processor/testdata/microdump.stackwalk.machine_readable-arm.out \
 	src/processor/testdata/microdump-withcrashreason.dmp \
 	src/processor/testdata/microdump-x86.dmp \
+	src/processor/testdata/minidump_32bit_crash_addr.dmp \
 	src/processor/testdata/minidump2.dmp \
 	src/processor/testdata/minidump2.dump.out \
 	src/processor/testdata/minidump2.stackwalk.machine_readable.out \
@@ -1490,6 +1710,7 @@ EXTRA_DIST = \
 	src/processor/testdata/test_app.cc \
 	src/testing/googletest/include/gtest/gtest.h \
 	src/testing/googletest/include/gtest/gtest-death-test.h \
+	src/testing/googletest/include/gtest/gtest-matchers.h \
 	src/testing/googletest/include/gtest/gtest-message.h \
 	src/testing/googletest/include/gtest/gtest-param-test.h \
 	src/testing/googletest/include/gtest/gtest-printers.h \
@@ -1504,18 +1725,17 @@ EXTRA_DIST = \
 	src/testing/googletest/include/gtest/internal/gtest-death-test-internal.h \
 	src/testing/googletest/include/gtest/internal/gtest-filepath.h \
 	src/testing/googletest/include/gtest/internal/gtest-internal.h \
-	src/testing/googletest/include/gtest/internal/gtest-linked_ptr.h \
 	src/testing/googletest/include/gtest/internal/gtest-param-util-generated.h \
 	src/testing/googletest/include/gtest/internal/gtest-param-util.h \
 	src/testing/googletest/include/gtest/internal/gtest-port-arch.h \
 	src/testing/googletest/include/gtest/internal/gtest-port.h \
 	src/testing/googletest/include/gtest/internal/gtest-string.h \
-	src/testing/googletest/include/gtest/internal/gtest-tuple.h \
 	src/testing/googletest/include/gtest/internal/gtest-type-util.h \
 	src/testing/googletest/src/gtest.cc \
 	src/testing/googletest/src/gtest-death-test.cc \
 	src/testing/googletest/src/gtest-filepath.cc \
 	src/testing/googletest/src/gtest-internal-inl.h \
+	src/testing/googletest/src/gtest-matchers.cc \
 	src/testing/googletest/src/gtest-port.cc \
 	src/testing/googletest/src/gtest-printers.cc \
 	src/testing/googletest/src/gtest-test-part.cc \
@@ -1523,20 +1743,21 @@ EXTRA_DIST = \
 	src/testing/googlemock/include/gmock/gmock.h \
 	src/testing/googlemock/include/gmock/gmock-actions.h \
 	src/testing/googlemock/include/gmock/gmock-cardinalities.h \
+	src/testing/googlemock/include/gmock/gmock-function-mocker.h \
 	src/testing/googlemock/include/gmock/gmock-generated-actions.h \
 	src/testing/googlemock/include/gmock/gmock-generated-function-mockers.h \
 	src/testing/googlemock/include/gmock/gmock-generated-matchers.h \
-	src/testing/googlemock/include/gmock/gmock-generated-nice-strict.h \
 	src/testing/googlemock/include/gmock/gmock-matchers.h \
 	src/testing/googlemock/include/gmock/gmock-more-actions.h \
 	src/testing/googlemock/include/gmock/gmock-more-matchers.h \
+	src/testing/googlemock/include/gmock/gmock-nice-strict.h \
 	src/testing/googlemock/include/gmock/gmock-spec-builders.h \
 	src/testing/googlemock/include/gmock/internal/custom/gmock-generated-actions.h \
 	src/testing/googlemock/include/gmock/internal/custom/gmock-matchers.h \
 	src/testing/googlemock/include/gmock/internal/custom/gmock-port.h \
-	src/testing/googlemock/include/gmock/internal/gmock-generated-internal-utils.h \
 	src/testing/googlemock/include/gmock/internal/gmock-internal-utils.h \
 	src/testing/googlemock/include/gmock/internal/gmock-port.h \
+	src/testing/googlemock/include/gmock/internal/gmock-pp.h \
 	src/testing/googlemock/src/gmock.cc \
 	src/testing/googlemock/src/gmock-cardinalities.cc \
 	src/testing/googlemock/src/gmock-internal-utils.cc \
@@ -1555,10 +1776,12 @@ EXTRA_DIST = \
 	src/third_party/curl/typecheck-gcc.h \
 	src/third_party/curl/types.h \
 	src/third_party/mac_headers/architecture/byte_order.h \
+	src/third_party/mac_headers/arm/_types.h \
 	src/third_party/mac_headers/i386/_types.h \
 	src/third_party/mac_headers/mach/boolean.h \
+	src/third_party/mac_headers/mach/arm/boolean.h \
+	src/third_party/mac_headers/mach/arm/vm_types.h \
 	src/third_party/mac_headers/mach/i386/boolean.h \
-	src/third_party/mac_headers/mach/i386/vm_param.h \
 	src/third_party/mac_headers/mach/i386/vm_types.h \
 	src/third_party/mac_headers/mach/machine/boolean.h \
 	src/third_party/mac_headers/mach/machine.h \
@@ -1595,9 +1818,7 @@ EXTRA_DIST = \
 	src/tools/solaris/dump_syms/testdata/dump_syms_regtest.sym \
 	src/tools/windows/converter/ms_symbol_server_converter.cc \
 	src/tools/windows/converter/ms_symbol_server_converter.h \
-	src/tools/windows/converter/ms_symbol_server_converter.gyp \
 	src/tools/windows/dump_syms/dump_syms.cc \
-	src/tools/windows/dump_syms/dump_syms.gyp \
 	src/tools/windows/dump_syms/run_regtest.sh \
 	src/tools/windows/dump_syms/testdata/dump_syms_regtest.cc \
 	src/tools/windows/dump_syms/testdata/dump_syms_regtest.pdb \
@@ -1607,8 +1828,7 @@ EXTRA_DIST = \
 	src/tools/windows/dump_syms/testdata/omap_reorder_funcs.sym \
 	src/tools/windows/dump_syms/testdata/omap_stretched.sym \
 	src/tools/windows/dump_syms/testdata/omap_stretched_filled.sym \
-	src/tools/windows/symupload/symupload.cc \
-	src/tools/windows/symupload/symupload.gyp
+	src/tools/windows/symupload/symupload.cc
 
 mostlyclean-local:
 	-find src -name '*.dwo' -exec rm -f {} +
